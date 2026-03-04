@@ -1,6 +1,0 @@
-2026/03/04-15:52:55.034 7d40 Reusing MANIFEST C:\Users\Denis\Documents\Coding\Facebook Marketplace\browser_data\Default\Local Storage\leveldb/MANIFEST-000001
-2026/03/04-15:52:55.039 7d40 Recovering log #7
-2026/03/04-15:52:55.040 7d40 Reusing old log C:\Users\Denis\Documents\Coding\Facebook Marketplace\browser_data\Default\Local Storage\leveldb/000007.log 
-2026/03/04-15:53:55.052 7d40 Level-0 table #11: started
-2026/03/04-15:53:55.059 7d40 Level-0 table #11: 29173 bytes OK
-2026/03/04-15:53:55.065 7d40 Delete type=0 #7
