@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Lister for Facebook Marketplace</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div id="tunnelPanel" class="tunnel-panel" style="display: none;">
+        <div class="tunnel-qr-container">
+            <h3>Access on Mobile</h3>
+            <img id="tunnelQr" src="" alt="Tunnel QR Code">
+            <p id="tunnelUrlText"></p>
+            <div class="tunnel-note">
+                Scan to take photos on your phone!
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>Marketplace Auto-Lister</h1>
+            <p>Upload photos of your item, and we'll analyze it, price it, write a description, and list it for you—all
+                automatically.</p>
+        </header>
+
+        <main>
+            <a href="camera.html" class="camera-hero-btn">
+                <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                    <circle cx="12" cy="13" r="4"></circle>
+                </svg>
+                Go to Photography Mode
+            </a>
+
+            <div class="dashboard">
+                <!-- Main Editor Column -->
+                <div class="main-content">
+                    <div class="upload-section">
+                        <form id="uploadForm">
+                            <div class="file-drop-area" id="dropArea">
+                                <span class="file-message">Drag & drop photos here or click to select</span>
+                                <input class="file-input" type="file" id="photoInput" name="photos" accept="image/*"
+                                    multiple>
+                            </div>
+                            <div id="previewArea" class="preview-area"></div>
+                            <button type="submit" id="submitBtn" class="primary-btn">Start Auto-Listing</button>
+                        </form>
+                    </div>
+
+                    <div class="status-section" id="statusSection" style="display: none;">
+                        <h2>Listing Progress</h2>
+                        <div class="loader"></div>
+                        <p id="statusMessage">Analyzing images with AI...</p>
+
+                        <div id="resultArea" style="display: none;">
+                            <h3>Generated Listing Details:</h3>
+                            <div class="result-card">
+                                <p><strong>Title:</strong> <span id="resTitle"></span></p>
+                                <p><strong>Price:</strong> $<span id="resPrice"></span></p>
+                                <p><strong>Category:</strong> <span id="resCategory"></span></p>
+                                <p><strong>Condition:</strong> <span id="resCondition"></span></p>
+                                <p><strong>Description:</strong></p>
+                                <p id="resDescription" class="desc-text"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sidebar Queue Column -->
+                <aside class="sidebar">
+                    <div class="queue-header">
+                        <h2>Pending Items <span id="queueCountBadge" class="badge">0</span>
+                            <button id="refreshBtn" class="icon-btn" onclick="loadQueue()" title="Refresh Queue">
+                                <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2"
+                                    fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="23 4 23 10 17 10"></polyline>
+                                    <polyline points="1 20 1 14 7 14"></polyline>
+                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15">
+                                    </path>
+                                </svg>
+                            </button>
+                        </h2>
+                    </div>
+
+                    <div class="queue-scroll-area">
+                        <div id="queueGrid" class="queue-grid">
+                            <!-- Queue items populated by JS -->
+                        </div>
+
+                        <div id="emptyQueueMsg" class="empty-state"
+                            style="padding: 2rem 1rem; border: 2px dashed #eee; border-radius: 12px; margin-top: 1rem;">
+                            <svg viewBox="0 0 24 24" width="32" height="32" stroke="#ccc" stroke-width="1.5" fill="none"
+                                stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 10px;">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                <polyline points="21 15 16 10 5 21"></polyline>
+                            </svg>
+                            <p style="font-size: 0.9rem; color: #888;">No items in queue.</p>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const form = document.getElementById('uploadForm');
+        const fileInput = document.getElementById('photoInput');
+        const dropArea = document.getElementById('dropArea');
+        const previewArea = document.getElementById('previewArea');
+
+        const statusSection = document.getElementById('statusSection');
+        const statusMessage = document.getElementById('statusMessage');
+        const loader = document.querySelector('.loader');
+        const submitBtn = document.getElementById('submitBtn');
+        const resultArea = document.getElementById('resultArea');
+
+        // --- Tab Logic ---
+        function switchTab(tabId) {
+            // Deprecated but keeping for compatibility if needed
+        }
+
+        // --- Server Queue Logic ---
+
+        async function loadQueue() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            refreshBtn.classList.add('spinning');
+
+            try {
+                const response = await fetch('/api/queue');
+                const data = await response.json();
+                const queue = data.queue || [];
+
+                document.getElementById('queueCountBadge').textContent = queue.length;
+                renderQueue(queue.sort((a, b) => b.timestamp - a.timestamp));
+            } catch (err) {
+                console.error("Failed to load queue from server", err);
+            } finally {
+                setTimeout(() => refreshBtn.classList.remove('spinning'), 500);
+            }
+        }
+
+        function renderQueue(items) {
+            const grid = document.getElementById('queueGrid');
+            const msg = document.getElementById('emptyQueueMsg');
+
+            grid.innerHTML = '';
+
+            if (items.length === 0) {
+                grid.style.display = 'none';
+                msg.style.display = 'block';
+                return;
+            }
+
+            grid.style.display = 'grid';
+            msg.style.display = 'none';
+
+            items.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'queue-card';
+                card.id = `queue-card-${item.id}`;
+
+                // Create image thumbnails
+                const imgContainer = document.createElement('div');
+                imgContainer.className = 'queue-images';
+
+                // Show up to 3 thumbnails
+                const maxThumbs = Math.min(item.photoPaths.length, 3);
+                for (let i = 0; i < maxThumbs; i++) {
+                    const img = document.createElement('img');
+                    // Serve from the static /uploads/ route 
+                    // photoPaths are like 'uploads/filename.jpg', so we prefix with '/'
+                    const normalizedPath = item.photoPaths[i].replace(/\\/g, '/');
+                    const publicPath = normalizedPath.includes('uploads')
+                        ? normalizedPath.substring(normalizedPath.indexOf('uploads'))
+                        : normalizedPath;
+
+                    img.src = publicPath.startsWith('/') ? publicPath : `/${publicPath}`;
+                    img.className = 'queue-img';
+                    imgContainer.appendChild(img);
+                }
+
+                if (item.photoPaths.length > 3) {
+                    const moreIndicator = document.createElement('div');
+                    moreIndicator.className = 'queue-more-indicator';
+                    moreIndicator.textContent = `+${item.photoPaths.length - 3}`;
+                    moreIndicator.style.cssText = 'background: #eee; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; color: #666; width: 60px; height: 60px; object-fit: cover; border-radius: 8px; flex-shrink: 0;';
+                    imgContainer.appendChild(moreIndicator);
+                }
+
+                const details = document.createElement('div');
+                details.className = 'queue-details';
+
+                const date = new Date(item.timestamp).toLocaleString();
+                details.innerHTML = `
+                    <div class="queue-stats">
+                        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                            <polyline points="21 15 16 10 5 21"></polyline>
+                        </svg>
+                        ${item.photoPaths.length} photos • ${date}
+                    </div>
+                    <div class="queue-actions">
+                        <button class="btn-load" onclick="loadQueueItem('${item.id}')">Load into Editor</button>
+                        <button class="btn-delete-icon" onclick="deleteQueueItem('${item.id}')" title="Delete Item">
+                            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                <line x1="10" y1="11" x2="10" y2="17"></line>
+                                <line x1="14" y1="11" x2="14" y2="17"></line>
+                            </svg>
+                        </button>
+                    </div>
+                `;
+
+                card.appendChild(imgContainer);
+                card.appendChild(details);
+                grid.appendChild(card);
+            });
+        }
+
+        async function loadQueueItem(id) {
+            // Find the item in our local data or refetch
+            const response = await fetch('/api/queue');
+            const data = await response.json();
+            const item = data.queue.find(i => i.id === id);
+
+            if (!item) return;
+
+            // Show loading state in editor
+            const originalBtnText = submitBtn.textContent;
+            submitBtn.textContent = 'Downloading from Queue...';
+            submitBtn.disabled = true;
+
+            try {
+                // Clear existing editor files
+                selectedFiles.forEach(file => URL.revokeObjectURL(file.previewUrl));
+                selectedFiles = [];
+
+                // Fetch each photo as a Blob
+                for (const path of item.photoPaths) {
+                    const normalizedPath = path.replace(/\\/g, '/');
+                    const publicPath = normalizedPath.includes('uploads')
+                        ? normalizedPath.substring(normalizedPath.indexOf('uploads'))
+                        : normalizedPath;
+
+                    const imgRes = await fetch(`/${publicPath}`);
+                    const blob = await imgRes.blob();
+
+                    // Convert Blob to File object
+                    const fileName = publicPath.split('/').pop();
+                    const file = new File([blob], fileName, { type: 'image/jpeg' });
+                    file.previewUrl = URL.createObjectURL(file);
+                    selectedFiles.push(file);
+                }
+
+                aiPhotoFile = selectedFiles[0];
+                updateGallery();
+
+                // Auto-delete from queue once loaded into editor? 
+                // User might want to keep it until listed. Let's KEEP it for now.
+
+                submitBtn.textContent = originalBtnText;
+                submitBtn.disabled = false;
+
+                // Smooth scroll to editor
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+
+            } catch (error) {
+                console.error("Error loading queue item:", error);
+                alert("Failed to load item from queue.");
+                submitBtn.textContent = originalBtnText;
+                submitBtn.disabled = false;
+            }
+        }
+
+        async function deleteQueueItem(id, refreshUI = true) {
+            try {
+                await fetch(`/api/queue/${id}`, { method: 'DELETE' });
+                if (refreshUI) loadQueue();
+            } catch (err) {
+                console.error("Failed to delete", err);
+            }
+        }
+
+        async function clearQueue() {
+            if (!confirm("Are you sure you want to clear all queue items? This must currently be done individually or restart the server.")) return;
+            // The simple mock doesn't have a clear all endpoint, so we can just refresh to show it's mostly server-handled
+            loadQueue();
+        }
+
+        // Fetch Tunnel Info
+        async function fetchTunnelInfo() {
+            try {
+                const res = await fetch('/api/tunnel-info');
+                const data = await res.json();
+                if (data.url && data.qr) {
+                    document.getElementById('tunnelPanel').style.display = 'block';
+                    document.getElementById('tunnelQr').src = data.qr;
+                    document.getElementById('tunnelUrlText').textContent = data.url;
+                }
+            } catch (err) {
+                console.error("Failed to fetch tunnel info", err);
+            }
+        }
+
+        // Load Queue initially
+        window.addEventListener('DOMContentLoaded', () => {
+            loadQueue();
+            fetchTunnelInfo();
+        });
+
+        // Handle drag and drop visuals
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropArea.classList.add('highlight');
+        }
+
+        function unhighlight(e) {
+            dropArea.classList.remove('highlight');
+        }
+
+        let selectedFiles = [];
+        let aiPhotoFile = null;
+
+        // Handle file selection via drop
+        dropArea.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            addFiles(dt.files);
+        }
+
+        // Handle file selection via click
+        fileInput.addEventListener('change', function () {
+            addFiles(this.files);
+            this.value = ''; // Reset input to allow adding the same file again if removed
+        });
+
+        function addFiles(files) {
+            [...files].forEach(file => {
+                if (file.type.startsWith('image/')) {
+                    // Create a persistent preview URL for this file object to avoid re-reading
+                    file.previewUrl = URL.createObjectURL(file);
+                    selectedFiles.push(file);
+                }
+            });
+            if (!aiPhotoFile && selectedFiles.length > 0) {
+                aiPhotoFile = selectedFiles[0];
+            }
+            updateGallery();
+        }
+
+        let draggedIndex = null;
+
+        function updateGallery() {
+            previewArea.innerHTML = '';
+
+            // Validate aiPhotoFile exists
+            if (selectedFiles.length > 0 && !selectedFiles.includes(aiPhotoFile)) {
+                aiPhotoFile = selectedFiles[0];
+            } else if (selectedFiles.length === 0) {
+                aiPhotoFile = null;
+            }
+
+            selectedFiles.forEach((file, index) => {
+                const wrapper = document.createElement('div');
+                wrapper.classList.add('preview-item-wrapper');
+                wrapper.draggable = true;
+
+                // Drag and Drop Events for Reordering
+                wrapper.addEventListener('dragstart', (evt) => {
+                    draggedIndex = index;
+                    evt.dataTransfer.effectAllowed = 'move';
+                    wrapper.classList.add('dragging');
+                });
+                wrapper.addEventListener('dragend', () => {
+                    wrapper.classList.remove('dragging');
+                    draggedIndex = null;
+                    document.querySelectorAll('.preview-item-wrapper').forEach(el => el.classList.remove('drag-over'));
+                });
+                wrapper.addEventListener('dragover', (evt) => {
+                    evt.preventDefault();
+                    evt.dataTransfer.dropEffect = 'move';
+                    wrapper.classList.add('drag-over');
+                });
+                wrapper.addEventListener('dragleave', () => {
+                    wrapper.classList.remove('drag-over');
+                });
+                wrapper.addEventListener('drop', (evt) => {
+                    evt.preventDefault();
+                    wrapper.classList.remove('drag-over');
+                    if (draggedIndex !== null && draggedIndex !== index) {
+                        const draggedFile = selectedFiles[draggedIndex];
+                        selectedFiles.splice(draggedIndex, 1);
+                        selectedFiles.splice(index, 0, draggedFile);
+                        updateGallery();
+                    }
+                });
+
+                const img = document.createElement('img');
+                img.src = file.previewUrl; // Instant load from Memory
+                img.classList.add('preview-img');
+                img.draggable = false;
+                img.style.cursor = 'pointer';
+                img.title = 'Click to mark as AI Photo';
+                img.onclick = () => {
+                    aiPhotoFile = file;
+                    updateGallery();
+                };
+
+                const removeBtn = document.createElement('button');
+                removeBtn.innerHTML = '&times;';
+                removeBtn.classList.add('remove-btn');
+                removeBtn.onclick = (evt) => {
+                    evt.preventDefault();
+                    URL.revokeObjectURL(file.previewUrl); // Cleanup memory
+                    selectedFiles.splice(index, 1);
+                    updateGallery();
+                };
+
+                wrapper.appendChild(img);
+                wrapper.appendChild(removeBtn);
+
+                if (file === aiPhotoFile) {
+                    const badge = document.createElement('div');
+                    badge.classList.add('primary-badge');
+                    badge.innerHTML = `
+                        <svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        AI PHOTO
+                    `;
+                    wrapper.style.boxShadow = '0 0 0 2px var(--primary-color)';
+                    wrapper.style.borderRadius = '6px';
+                    wrapper.appendChild(badge);
+                }
+
+                previewArea.appendChild(wrapper);
+            });
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            if (selectedFiles.length === 0) return;
+
+            // UI Updates
+            submitBtn.disabled = true;
+            statusSection.style.display = 'block';
+            resultArea.style.display = 'none';
+            statusMessage.textContent = 'Uploading photos and asking AI to analyze...';
+            loader.style.display = 'block';
+
+            const formData = new FormData();
+            for (const file of selectedFiles) {
+                formData.append('photos', file);
+            }
+
+            const aiIndex = selectedFiles.indexOf(aiPhotoFile);
+            formData.append('aiPhotoIndex', aiIndex !== -1 ? aiIndex : 0);
+
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    statusMessage.textContent = 'Successfully listed on Facebook Marketplace!';
+                    statusMessage.style.color = 'var(--success-color)';
+                    loader.style.display = 'none';
+
+                    // Show results
+                    document.getElementById('resTitle').textContent = result.details.title;
+                    document.getElementById('resPrice').textContent = result.details.price;
+                    document.getElementById('resCategory').textContent = result.details.category;
+                    document.getElementById('resCondition').textContent = result.details.condition;
+                    document.getElementById('resDescription').textContent = result.details.description;
+                    resultArea.style.display = 'block';
+                } else {
+                    throw new Error(result.error || 'Failed to list item.');
+                }
+            } catch (error) {
+                statusMessage.textContent = `Error: ${error.message}`;
+                statusMessage.style.color = 'var(--error-color)';
+                loader.style.display = 'none';
+                submitBtn.disabled = false;
+            }
+        });
+
+        // --- QR/Tunnel Logic ---
+        let qrVisible = true;
+        function toggleQr() {
+            const panel = document.getElementById('qrPanel');
+            const btn = document.getElementById('showQrBtn');
+            qrVisible = !qrVisible;
+            panel.style.display = qrVisible ? 'block' : 'none';
+            btn.style.display = qrVisible ? 'none' : 'flex';
+        }
+
+        async function updateTunnelInfo() {
+            try {
+                const res = await fetch('/api/tunnel-info');
+                const data = await res.json();
+                if (data.url && data.qr) {
+                    document.getElementById('qrImage').src = data.qr;
+                    document.getElementById('tunnelLink').innerHTML = `<a href="${data.url}" target="_blank">${data.url}</a>`;
+                    document.getElementById('qrPanel').style.display = qrVisible ? 'block' : 'none';
+                    if (!qrVisible) document.getElementById('showQrBtn').style.display = 'flex';
+                }
+            } catch (err) {
+                console.error("Failed to fetch tunnel info", err);
+            }
+        }
+
+        // Initial fetch
+        updateTunnelInfo();
+        // Refresh every 30 seconds in case tunnel restablishes
+        setInterval(updateTunnelInfo, 30000);
+    </script>
+
+    <!-- Floating QR Code Panel -->
+    <div id="qrPanel" class="qr-panel" style="display: none;">
+        <div class="qr-header">
+            <h3>📱 Phone Mode</h3>
+            <button class="close-qr" onclick="toggleQr()">×</button>
+        </div>
+        <div class="qr-body">
+            <p>Scan to take photos with your phone:</p>
+            <div id="qrContainer" class="qr-container">
+                <img id="qrImage" src="" alt="Scan Me">
+            </div>
+            <div id="tunnelLink" class="tunnel-link"></div>
+        </div>
+    </div>
+    <button id="showQrBtn" class="show-qr-btn" onclick="toggleQr()" style="display: none;">
+        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <rect x="7" y="7" width="3" height="3"></rect>
+            <rect x="14" y="7" width="3" height="3"></rect>
+            <rect x="7" y="14" width="3" height="3"></rect>
+            <rect x="14" y="14" width="1" height="1"></rect>
+        </svg>
+    </button>
+    </script>
+</body>
+
+</html>
