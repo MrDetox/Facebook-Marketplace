@@ -739,7 +739,7 @@ header p {
 /* Floating QR Panel */
 .qr-panel {
     position: fixed;
-    bottom: 24px;
+    bottom: 92px;
     left: 24px;
     width: 280px;
     background: rgba(255, 255, 255, 0.85);

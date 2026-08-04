@@ -62,12 +62,15 @@ test('matches the closest Facebook category', () => {
     assert.equal(findBestCategoryIndex('Books', []), 0);
 });
 
-test('requires the QR token for non-local requests', async t => {
+test('keeps data private while accepting the phone QR token', async t => {
     const server = app.listen(0, '127.0.0.1');
     await new Promise(resolve => server.once('listening', resolve));
     t.after(() => new Promise(resolve => server.close(resolve)));
 
     const remoteHeaders = { Host: 'example.trycloudflare.com' };
+    const publicPage = await request(server, '/', remoteHeaders);
+    assert.equal(publicPage.status, 200);
+
     const denied = await request(server, '/api/queue', remoteHeaders);
     assert.equal(denied.status, 401);
 
@@ -77,9 +80,14 @@ test('requires the QR token for non-local requests', async t => {
     });
     assert.equal(spoofedLocalHost.status, 401);
 
-    const accepted = await request(server, '/?token=test-access-token', remoteHeaders);
-    assert.equal(accepted.status, 302);
-    assert.equal(accepted.headers.location, '/');
+    const headerAuthorized = await request(server, '/api/queue', {
+        ...remoteHeaders,
+        'X-Access-Token': 'test-access-token'
+    });
+    assert.equal(headerAuthorized.status, 200);
+
+    const accepted = await request(server, '/api/queue?token=test-access-token', remoteHeaders);
+    assert.equal(accepted.status, 200);
 
     const cookie = accepted.headers['set-cookie'][0].split(';')[0];
     const authorized = await request(server, '/api/queue', { ...remoteHeaders, Cookie: cookie });

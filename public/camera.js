@@ -16,6 +16,22 @@ let currentStream = null;
 let currentPhotos = []; // Array of blobs
 const maxPhotos = 10;
 const maxFileSize = 12 * 1024 * 1024;
+const accessTokenKey = 'fb_marketplace_access';
+
+const pageUrl = new URL(window.location.href);
+const pageAccessToken = pageUrl.searchParams.get('token');
+if (pageAccessToken) {
+    sessionStorage.setItem(accessTokenKey, pageAccessToken);
+    pageUrl.searchParams.delete('token');
+    history.replaceState({}, '', `${pageUrl.pathname}${pageUrl.search}${pageUrl.hash}`);
+}
+
+function authenticatedFetch(url, options = {}) {
+    const headers = new Headers(options.headers || {});
+    const token = sessionStorage.getItem(accessTokenKey);
+    if (token) headers.set('X-Access-Token', token);
+    return fetch(url, { ...options, headers });
+}
 
 function addPhoto(photo) {
     if (currentPhotos.length >= maxPhotos) {
@@ -183,7 +199,7 @@ doneBtn.addEventListener('click', async () => {
     });
 
     try {
-        const response = await fetch('/api/queue', {
+        const response = await authenticatedFetch('/api/queue', {
             method: 'POST',
             body: formData
         });

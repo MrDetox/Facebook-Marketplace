@@ -7,7 +7,6 @@ const dotenv = require('dotenv');
 const { researchItem, detectImageMime } = require('./ai_researcher');
 const { uploadToFacebook, closeBrowser } = require('./facebook_uploader');
 const { spawn } = require('child_process');
-const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
 
 dotenv.config();
@@ -112,21 +111,20 @@ function isLocalRequest(req) {
 }
 
 app.set('trust proxy', 1);
+app.use(express.static(path.join(__dirname, 'public')));
 app.use((req, res, next) => {
-    if (isLocalRequest(req) || tokensMatch(cookieValue(req, accessCookie))) return next();
+    const headerToken = req.get('x-access-token');
+    if (isLocalRequest(req) || tokensMatch(cookieValue(req, accessCookie)) || tokensMatch(headerToken)) return next();
 
     const queryToken = typeof req.query.token === 'string' ? req.query.token : '';
     if (tokensMatch(queryToken)) {
         res.cookie(accessCookie, accessToken, {
             httpOnly: true,
             maxAge: 24 * 60 * 60 * 1000,
-            sameSite: 'strict',
+            sameSite: 'lax',
             secure: true
         });
-
-        const cleanUrl = new URL(req.originalUrl, 'http://localhost');
-        cleanUrl.searchParams.delete('token');
-        return res.redirect(`${cleanUrl.pathname}${cleanUrl.search}`);
+        return next();
     }
 
     if (req.path.startsWith('/api/')) {
@@ -152,7 +150,6 @@ const upload = multer({
     }
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
 function singleUpload(req, res, next) {
@@ -304,10 +301,7 @@ async function setTunnelUrl(baseUrl) {
     tunnelUrl = protectedUrl;
     tunnelQrDataUrl = qrDataUrl;
 
-    console.log('\n-----------------------------------------');
-    console.log(`Secure phone link: ${tunnelUrl}`);
-    qrcodeTerminal.generate(tunnelUrl, { small: true }, code => console.log(code));
-    console.log('-----------------------------------------\n');
+    console.log('Phone QR is ready on the local main page.');
 }
 
 function startTunnel(listenPort) {

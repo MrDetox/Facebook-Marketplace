@@ -108,6 +108,31 @@
         const loader = document.querySelector('.loader');
         const submitBtn = document.getElementById('submitBtn');
         const resultArea = document.getElementById('resultArea');
+        const accessTokenKey = 'fb_marketplace_access';
+
+        const pageUrl = new URL(window.location.href);
+        const pageAccessToken = pageUrl.searchParams.get('token');
+        if (pageAccessToken) {
+            sessionStorage.setItem(accessTokenKey, pageAccessToken);
+            pageUrl.searchParams.delete('token');
+            history.replaceState({}, '', `${pageUrl.pathname}${pageUrl.search}${pageUrl.hash}`);
+        }
+
+        function authenticatedFetch(url, options = {}) {
+            const headers = new Headers(options.headers || {});
+            const token = sessionStorage.getItem(accessTokenKey);
+            if (token) headers.set('X-Access-Token', token);
+            return fetch(url, { ...options, headers });
+        }
+
+        function authenticatedUrl(url) {
+            const token = sessionStorage.getItem(accessTokenKey);
+            if (!token) return url;
+
+            const target = new URL(url, window.location.origin);
+            target.searchParams.set('token', token);
+            return `${target.pathname}${target.search}${target.hash}`;
+        }
 
         // --- Tab Logic ---
         function switchTab(tabId) {
@@ -121,7 +146,7 @@
             refreshBtn.classList.add('spinning');
 
             try {
-                const response = await fetch('/api/queue');
+                const response = await authenticatedFetch('/api/queue');
                 const data = await response.json();
                 const queue = data.queue || [];
 
@@ -162,7 +187,7 @@
                 const maxThumbs = Math.min(item.photoPaths.length, 3);
                 for (let i = 0; i < maxThumbs; i++) {
                     const img = document.createElement('img');
-                    img.src = `/uploads/${encodeURIComponent(item.photoPaths[i])}`;
+                    img.src = authenticatedUrl(`/uploads/${encodeURIComponent(item.photoPaths[i])}`);
                     img.className = 'queue-img';
                     imgContainer.appendChild(img);
                 }
@@ -208,7 +233,7 @@
         }
 
         async function loadQueueItem(id) {
-            const response = await fetch('/api/queue');
+            const response = await authenticatedFetch('/api/queue');
             if (!response.ok) throw new Error('Could not load the queue.');
             const data = await response.json();
             const item = data.queue.find(i => i.id === id);
@@ -226,7 +251,7 @@
                 selectedFiles = [];
 
                 for (const filename of item.photoPaths) {
-                    const imgRes = await fetch(`/uploads/${encodeURIComponent(filename)}`);
+                    const imgRes = await authenticatedFetch(`/uploads/${encodeURIComponent(filename)}`);
                     if (!imgRes.ok) throw new Error(`Could not download ${filename}.`);
                     const blob = await imgRes.blob();
 
@@ -256,7 +281,7 @@
 
         async function deleteQueueItem(id, refreshUI = true) {
             try {
-                const response = await fetch(`/api/queue/${id}`, { method: 'DELETE' });
+                const response = await authenticatedFetch(`/api/queue/${id}`, { method: 'DELETE' });
                 if (!response.ok) throw new Error('Could not delete the item.');
                 if (activeQueueId === id) activeQueueId = null;
                 if (refreshUI) loadQueue();
@@ -453,7 +478,7 @@
             formData.append('aiPhotoIndex', aiIndex !== -1 ? aiIndex : 0);
 
             try {
-                const response = await fetch('/api/upload', {
+                const response = await authenticatedFetch('/api/upload', {
                     method: 'POST',
                     body: formData
                 });
@@ -485,18 +510,22 @@
         });
 
         // --- QR/Tunnel Logic ---
-        let qrVisible = true;
+        let qrVisible = false;
         function toggleQr() {
             const panel = document.getElementById('qrPanel');
             const btn = document.getElementById('showQrBtn');
             qrVisible = !qrVisible;
             panel.style.display = qrVisible ? 'block' : 'none';
-            btn.style.display = qrVisible ? 'none' : 'flex';
+            btn.setAttribute('aria-label', qrVisible ? 'Hide phone QR code' : 'Show phone QR code');
         }
 
         async function updateTunnelInfo() {
+            const status = document.getElementById('qrStatus');
+            const container = document.getElementById('qrContainer');
+            const tunnelLink = document.getElementById('tunnelLink');
             try {
-                const res = await fetch('/api/tunnel-info');
+                const res = await authenticatedFetch('/api/tunnel-info');
+                if (!res.ok) throw new Error(`Server returned ${res.status}.`);
                 const data = await res.json();
                 if (data.url && data.qr) {
                     document.getElementById('qrImage').src = data.qr;
@@ -505,19 +534,27 @@
                     link.target = '_blank';
                     link.rel = 'noopener';
                     link.textContent = 'Open secure Photography Mode';
-                    document.getElementById('tunnelLink').replaceChildren(link);
-                    document.getElementById('qrPanel').style.display = qrVisible ? 'block' : 'none';
-                    if (!qrVisible) document.getElementById('showQrBtn').style.display = 'flex';
+                    tunnelLink.replaceChildren(link);
+                    status.textContent = 'Scan this secure code to open Photography Mode on your phone.';
+                    container.style.display = 'block';
+                    tunnelLink.style.display = 'block';
+                } else {
+                    status.textContent = 'Starting the secure phone link...';
+                    container.style.display = 'none';
+                    tunnelLink.style.display = 'none';
                 }
             } catch (err) {
                 console.error("Failed to fetch tunnel info", err);
+                status.textContent = 'The secure phone link is not ready yet.';
+                container.style.display = 'none';
+                tunnelLink.style.display = 'none';
             }
         }
 
         // Initial fetch
         updateTunnelInfo();
-        // Refresh every 30 seconds in case tunnel restablishes
-        setInterval(updateTunnelInfo, 30000);
+        // Refresh quickly while the tunnel starts or reconnects.
+        setInterval(updateTunnelInfo, 3000);
     </script>
 
     <!-- Floating QR Code Panel -->
@@ -527,14 +564,14 @@
             <button type="button" class="close-qr" onclick="toggleQr()" aria-label="Hide QR code">×</button>
         </div>
         <div class="qr-body">
-            <p>Scan this secure code to open Photography Mode on your phone.</p>
-            <div id="qrContainer" class="qr-container">
+            <p id="qrStatus">Starting the secure phone link...</p>
+            <div id="qrContainer" class="qr-container" style="display: none;">
                 <img id="qrImage" src="" alt="Scan Me">
             </div>
-            <div id="tunnelLink" class="tunnel-link"></div>
+            <div id="tunnelLink" class="tunnel-link" style="display: none;"></div>
         </div>
     </div>
-    <button type="button" id="showQrBtn" class="show-qr-btn" onclick="toggleQr()" style="display: none;"
+    <button type="button" id="showQrBtn" class="show-qr-btn" onclick="toggleQr()" style="display: flex;"
         aria-label="Show phone QR code">
         <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"
             stroke-linecap="round" stroke-linejoin="round">
