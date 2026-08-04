@@ -2,26 +2,44 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
+let sharedContext = null;
+let contextLaunch = null;
+
+async function getBrowserContext() {
+    if (sharedContext) return sharedContext;
+
+    if (!contextLaunch) {
+        const userDataDir = path.join(__dirname, 'browser_data');
+        fs.mkdirSync(userDataDir, { recursive: true });
+        console.log(`Launching persistent browser context from: ${userDataDir}`);
+
+        contextLaunch = chromium.launchPersistentContext(userDataDir, {
+            headless: false,
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }).then(context => {
+            sharedContext = context;
+            context.once('close', () => {
+                if (sharedContext === context) sharedContext = null;
+            });
+            return context;
+        }).finally(() => {
+            contextLaunch = null;
+        });
+    }
+
+    return contextLaunch;
+}
+
+async function closeBrowser() {
+    const context = sharedContext;
+    sharedContext = null;
+    if (context) await context.close().catch(() => {});
+}
+
 async function uploadToFacebook(photoPaths, listingDetails) {
     const username = process.env.FB_USERNAME;
     const password = process.env.FB_PASSWORD;
-
-    if (!username || !password) {
-        throw new Error("Facebook credentials missing in .env");
-    }
-
-    // Launch persistent browser context
-    const userDataDir = path.join(__dirname, 'browser_data');
-    if (!fs.existsSync(userDataDir)) {
-        fs.mkdirSync(userDataDir);
-    }
-
-    console.log(`Launching persistent browser context from: ${userDataDir}`);
-    const context = await chromium.launchPersistentContext(userDataDir, {
-        headless: false,
-        // Standard user agent to avoid being easily blocked
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    });
+    const context = await getBrowserContext();
 
     // Get the first default page from persistent context
     const page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
@@ -48,19 +66,23 @@ async function uploadToFacebook(photoPaths, listingDetails) {
         // Check if login fields exist
         const isLoginFormVisible = await page.isVisible('#email');
         if (isLoginFormVisible) {
+            if (!username || !password) throw new Error('Facebook credentials are missing from .env.');
+
             console.log("Not logged in. Entering credentials, but you may need to complete 2FA manually.");
             await page.fill('#email', username);
             await page.fill('#pass', password);
             await page.click('[name="login"]');
 
-            // Wait for main page to load
+            await page.waitForTimeout(1500);
             try {
-                // we'll wait 15 seconds. If that fails, tell user to login manually.
-                await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 });
-            } catch (e) {
-                console.log("Waiting for manual login/2FA completion... Please log in on the opened browser.");
-                // Wait indefinitely until the user navigates away from the login page
-                await page.waitForURL('**/facebook.com/**', { timeout: 0 });
+                console.log('Waiting for Facebook login or manual 2FA completion...');
+                await page.waitForFunction(() => {
+                    const path = window.location.pathname.toLowerCase();
+                    const loginVisible = document.querySelector('#email')?.offsetParent !== null;
+                    return !loginVisible && !path.includes('/login') && !path.includes('/checkpoint') && !path.includes('/two_step');
+                }, null, { timeout: 300000 });
+            } catch {
+                throw new Error('Facebook login was not completed within five minutes.');
             }
         }
 
@@ -84,17 +106,15 @@ async function uploadToFacebook(photoPaths, listingDetails) {
 
         // 4. Fill Title
         console.log("Filling Title...");
-        const titleInput = await page.getByLabel('Title', { exact: true });
-        if (await titleInput.isVisible()) {
-            await titleInput.fill(listingDetails.title);
-        }
+        const titleInput = page.getByLabel('Title', { exact: true });
+        await titleInput.waitFor({ state: 'visible', timeout: 10000 });
+        await titleInput.fill(listingDetails.title);
 
         // 5. Fill Price
         console.log("Filling Price...");
-        const priceInput = await page.getByLabel('Price', { exact: true });
-        if (await priceInput.isVisible()) {
-            await priceInput.fill(listingDetails.price.toString());
-        }
+        const priceInput = page.getByLabel('Price', { exact: true });
+        await priceInput.waitFor({ state: 'visible', timeout: 10000 });
+        await priceInput.fill(listingDetails.price.toString());
 
         // 6. Select Category
         console.log('Filling Category...');
@@ -117,6 +137,8 @@ async function uploadToFacebook(photoPaths, listingDetails) {
 
             console.log(`Found ${options.length} category suggestions:`, options);
 
+            if (!options.length) throw new Error('Facebook returned no category suggestions.');
+
             const bestIndex = findBestCategoryIndex(listingDetails.category, options);
             console.log(`Best category match index: ${bestIndex} (${options[bestIndex]})`);
 
@@ -124,9 +146,7 @@ async function uploadToFacebook(photoPaths, listingDetails) {
             const listbox = page.getByRole('listbox').first();
             await listbox.getByText(options[bestIndex], { exact: true }).first().click();
         } catch (catError) {
-            console.error(`Could not auto-fill category. Error: ${catError.message}`);
-            // Fallback: try to just press Enter if we can't find the dropdown
-            await page.keyboard.press('Enter');
+            throw new Error(`Could not select the Facebook category: ${catError.message}`);
         }
 
         // 7. Select Condition
@@ -143,10 +163,10 @@ async function uploadToFacebook(photoPaths, listingDetails) {
             if (await conditionOption.isVisible()) {
                 await conditionOption.click();
             } else {
-                console.log(`Could not find condition matching: ${listingDetails.condition}`);
+                throw new Error(`Facebook has no condition matching ${listingDetails.condition}.`);
             }
         } catch (e) {
-            console.log("Could not auto-fill condition. Error:", e.message);
+            throw new Error(`Could not select the Facebook condition: ${e.message}`);
         }
 
         // 8. Check Description visibility and Click "More details" if needed
@@ -176,12 +196,11 @@ async function uploadToFacebook(photoPaths, listingDetails) {
         // 9. Fill Description
         console.log("Filling Description...");
         try {
-            const descriptionInput = await page.getByLabel('Description', { exact: true });
-            if (await descriptionInput.isVisible()) {
-                await descriptionInput.fill(listingDetails.description);
-            }
+            const descriptionInput = page.getByLabel('Description', { exact: true });
+            await descriptionInput.waitFor({ state: 'visible', timeout: 10000 });
+            await descriptionInput.fill(listingDetails.description);
         } catch (e) {
-            console.log("Could not fill description. Error:", e.message);
+            throw new Error(`Could not fill the Facebook description: ${e.message}`);
         }
 
         // 10. Hide from friends toggle
@@ -209,7 +228,8 @@ async function uploadToFacebook(photoPaths, listingDetails) {
             console.log("Could not find 'Hide from friends' toggle. Error:", e.message);
         }
 
-        console.log("Draft complete! Leaving browser open for user to review and hit Publish.");
+        console.log("Draft ready. Leaving the shared browser open for review and publishing.");
+        return { status: 'draft_ready' };
 
     } catch (error) {
         console.error("Playwright Error:", error);
@@ -312,5 +332,5 @@ function findBestCategoryIndex(target, options) {
     return bestIdx || 0;
 }
 
-module.exports = { uploadToFacebook };
+module.exports = { closeBrowser, findBestCategoryIndex, uploadToFacebook };
 

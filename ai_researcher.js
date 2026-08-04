@@ -1,53 +1,106 @@
 const { GoogleGenAI } = require('@google/genai');
 const fs = require('fs');
 
+const collectionLine = 'Collection from LS6, Holborn Approach street.';
+const allowedConditions = new Set(['New', 'Used - like new', 'Used - good', 'Used - fair']);
+const listingSchema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+        title: { type: 'string', description: 'Clear item title including author or brand and format when visible.' },
+        price: { type: 'string', description: 'Competitive UK used price as digits only, with optional decimal places.' },
+        category: { type: 'string', description: 'The most specific Facebook Marketplace category for the item.' },
+        condition: { type: 'string', enum: [...allowedConditions] },
+        description: { type: 'string', description: 'Exactly three short paragraphs separated by blank lines.' }
+    },
+    required: ['title', 'price', 'category', 'condition', 'description']
+};
+
+function detectImageMime(filePath) {
+    const bytes = Buffer.alloc(16);
+    const descriptor = fs.openSync(filePath, 'r');
+    const length = fs.readSync(descriptor, bytes, 0, bytes.length, 0);
+    fs.closeSync(descriptor);
+
+    if (length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+    if (length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+    if (length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+
+    const brand = length >= 12 ? bytes.toString('ascii', 8, 12) : '';
+    if (['heic', 'heix', 'hevc', 'hevx'].includes(brand)) return 'image/heic';
+    if (['heif', 'mif1', 'msf1'].includes(brand)) return 'image/heif';
+    return null;
+}
+
+function normalizeListingDetails(details) {
+    if (!details || typeof details !== 'object' || Array.isArray(details)) {
+        throw new Error('AI returned an invalid listing.');
+    }
+
+    const title = String(details.title || '').trim();
+    const price = String(details.price || '').trim();
+    const category = String(details.category || '').trim();
+    const condition = String(details.condition || '').trim();
+    const description = String(details.description || '').replace(/\\n/g, '\n').trim();
+
+    if (!title || title.length > 100) throw new Error('AI returned an invalid title.');
+    if (!/^\d+(?:\.\d{1,2})?$/.test(price)) throw new Error('AI returned an invalid price.');
+    if (!category) throw new Error('AI returned an invalid category.');
+    if (!allowedConditions.has(condition)) throw new Error('AI returned an invalid condition.');
+
+    const bodyParagraphs = description.split(/\n\s*\n/)
+        .map(paragraph => paragraph.replace(/\s+/g, ' ').trim())
+        .filter(paragraph => paragraph && !/^collection\s+from\s+ls6\b/i.test(paragraph));
+
+    if (bodyParagraphs.length < 2) throw new Error('AI returned an invalid description.');
+
+    return {
+        title,
+        price,
+        category,
+        condition,
+        description: `${bodyParagraphs[0]}\n\n${bodyParagraphs.slice(1).join(' ')}\n\n${collectionLine}`
+    };
+}
+
 async function researchItem(photoPaths, aiPhotoIndex = 0) {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-    // Prepare only the specified image for Gemini to save tokens/focus
     const selectedPhoto = photoPaths[aiPhotoIndex] || photoPaths[0];
-    const imageParts = [
-        {
-            inlineData: {
-                data: Buffer.from(fs.readFileSync(selectedPhoto)).toString("base64"),
-                mimeType: "image/jpeg"
-            }
-        }
-    ];
+    if (!selectedPhoto) throw new Error('No image was provided for AI research.');
 
-    const prompt = `
-        You are an assistant helping a regular person list items on Facebook Marketplace.
-        I am providing you with photos of an item I want to sell. 
-        Analyze the images and provide the following details about the item so I can list it automatically.
-        
-        CRITICAL: The description must sound like an everyday person selling a personal item. It must be short, sweet, practical, and conversational. Do NOT use marketing fluff, artistic analysis, dramatic adjectives (e.g., "stunning", "dive into"), or press-release language. 
-        
-        Respond STRICTLY in the following JSON format without any markdown or extra text:
-        {
-        "title": "A clear, accurate title including brand/author and format (max 100 characters)",
-        "price": "A competitive price based on what this usually sells for used (JUST THE NUMBER)",
-        "category": "The most specific Facebook Marketplace category possible for this exact item (e.g., 'Skateboards & roller skates', 'Women\\'s fragrances', 'Living room furniture'). Do NOT use broad, generic buckets like 'Sporting Goods' or 'Electronics'.",
-        "condition": "Use exact text: 'New', 'Used - like new', 'Used - good', or 'Used - fair'",
-        "description": "A brief, casual description in the first person. FORMATTING RULE: You MUST separate the text into 3 distinct paragraphs using the literal escaped characters '\\\\n\\\\n' (do NOT use actual raw line breaks). Paragraph 1: Introduce the item. Paragraph 2: State the condition, flaws, and a relatable reason for selling. Paragraph 3: Exactly 'Collection from LS6, Holborn Approach street'."        }
-    `;
+    const mimeType = detectImageMime(selectedPhoto);
+    if (!mimeType) throw new Error('The selected file is not a supported image.');
+    if (!process.env.GEMINI_API_KEY) throw new Error('Gemini API key is missing from .env.');
+
+    const prompt = `You are helping a regular person create a UK Facebook Marketplace listing from an item photo.
+
+Return the title, price, category, condition, and description. The title must include the visible brand or author and format where relevant, and must be no more than 100 characters. Price must be a competitive used price in GBP, expressed as digits only without a currency symbol. Choose the most specific Facebook Marketplace category available. Do not invent flaws or details that are not visible.
+
+The description must sound casual and practical, with no marketing language. It must have exactly three paragraphs separated by blank lines. Paragraph 1 introduces the item. Paragraph 2 states the visible condition and a simple reason for selling. Paragraph 3 must be exactly: ${collectionLine}`;
 
     try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [prompt, ...imageParts],
+            model: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
+            contents: [
+                {
+                    inlineData: {
+                        data: fs.readFileSync(selectedPhoto, { encoding: 'base64' }),
+                        mimeType
+                    }
+                },
+                { text: prompt }
+            ],
+            config: {
+                responseMimeType: 'application/json',
+                responseJsonSchema: listingSchema
+            }
         });
 
-        let text = response.text;
-        // Clean up markdown quotes if Gemini accidentally adds them
-        text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-
-        const details = JSON.parse(text);
-        return details;
-
+        return normalizeListingDetails(JSON.parse(response.text));
     } catch (error) {
-        console.error("AI Research Error:", error);
-        throw new Error("Failed to analyze images with AI. Check API key and quota.");
+        console.error('AI Research Error:', error);
+        throw new Error('Failed to analyze the image with Gemini. Check the image, API key, and quota.', { cause: error });
     }
 }
 
-module.exports = { researchItem };
+module.exports = { detectImageMime, normalizeListingDetails, researchItem };

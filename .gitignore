@@ -1,4 +1,6 @@
 .env
+.queue.json
+.queue.json.tmp
 node_modules/
 browser_data/
 uploads/

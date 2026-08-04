@@ -14,6 +14,23 @@ const highQualCameraInput = document.getElementById('highQualCameraInput');
 
 let currentStream = null;
 let currentPhotos = []; // Array of blobs
+const maxPhotos = 10;
+const maxFileSize = 12 * 1024 * 1024;
+
+function addPhoto(photo) {
+    if (currentPhotos.length >= maxPhotos) {
+        alert(`You can use up to ${maxPhotos} photos per item.`);
+        return false;
+    }
+    if (photo.size > maxFileSize) {
+        alert('Each photo must be 12 MB or smaller.');
+        return false;
+    }
+
+    photo.previewUrl = URL.createObjectURL(photo);
+    currentPhotos.push(photo);
+    return true;
+}
 
 async function initCamera() {
     // If we're on HTTP or an unsupported browser, we don't even try getUserMedia
@@ -32,6 +49,8 @@ async function initCamera() {
         });
         currentStream = stream;
         video.srcObject = stream;
+        video.style.display = 'block';
+        if (nativeInfo) nativeInfo.style.display = 'none';
 
         // Use JS Shutter if we have the stream
         captureBtn.style.display = 'block';
@@ -63,6 +82,8 @@ function showFallback() {
 function stopCamera() {
     if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
+        currentStream = null;
+        video.srcObject = null;
     }
 }
 
@@ -89,8 +110,7 @@ async function takePhoto() {
 
     canvas.toBlob((blob) => {
         if (blob) {
-            currentPhotos.push(blob);
-            updateGalleryUI();
+            if (addPhoto(blob)) updateGalleryUI();
 
             // Visual feedback
             video.style.opacity = '0.3';
@@ -105,11 +125,12 @@ function updateGalleryUI() {
 
     currentPhotos.forEach((blob, index) => {
         const img = document.createElement('img');
-        img.src = URL.createObjectURL(blob);
+        img.src = blob.previewUrl;
         img.className = 'camera-thumb';
 
         // Optional: click to remove
         img.onclick = () => {
+            URL.revokeObjectURL(blob.previewUrl);
             currentPhotos.splice(index, 1);
             updateGalleryUI();
         };
@@ -124,9 +145,7 @@ captureBtn.addEventListener('click', takePhoto);
 
 nativeCameraInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
-        Array.from(e.target.files).forEach(file => {
-            currentPhotos.push(file);
-        });
+        Array.from(e.target.files).forEach(addPhoto);
         updateGalleryUI();
     }
     // Reset so same file can be selected again
@@ -139,9 +158,7 @@ proBtn.addEventListener('click', () => {
 
 highQualCameraInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
-        Array.from(e.target.files).forEach(file => {
-            currentPhotos.push(file);
-        });
+        Array.from(e.target.files).forEach(addPhoto);
         updateGalleryUI();
     }
     // Reset
@@ -171,9 +188,11 @@ doneBtn.addEventListener('click', async () => {
             body: formData
         });
 
-        if (!response.ok) throw new Error("Upload failed");
+        const result = await response.json().catch(() => ({ error: `Server returned ${response.status}.` }));
+        if (!response.ok) throw new Error(result.error || 'Upload failed.');
 
         // Clear current state for next item
+        currentPhotos.forEach(photo => URL.revokeObjectURL(photo.previewUrl));
         currentPhotos = [];
         updateGalleryUI();
 
@@ -193,6 +212,7 @@ doneBtn.addEventListener('click', async () => {
 });
 
 function goBackToMain() {
+    currentPhotos.forEach(photo => URL.revokeObjectURL(photo.previewUrl));
     stopCamera();
     window.location.href = 'index.html';
 }
@@ -206,6 +226,7 @@ finishBtn.addEventListener('click', () => {
 });
 
 backBtn.addEventListener('click', () => {
+    if (currentPhotos.length > 0 && !confirm("You have unsaved photos for the current item. Discard them?")) return;
     goBackToMain();
 });
 
