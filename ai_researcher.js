@@ -1,5 +1,8 @@
-const { GoogleGenAI } = require('@google/genai');
 const fs = require('fs');
+const crypto = require('crypto');
+
+// ponytail: in-memory, lost on restart. Same photo bytes = reuse the earlier AI result.
+const resultCache = new Map();
 
 // Default text appended to the bottom of every listing. Edit here.
 const footer = [
@@ -74,7 +77,8 @@ async function researchItem(photoPaths, aiPhotoIndex = 0) {
 
     const mimeType = detectImageMime(selectedPhoto);
     if (!mimeType) throw new Error('The selected file is not a supported image.');
-    if (!process.env.GEMINI_API_KEY) throw new Error('Gemini API key is missing from .env.');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) throw new Error('Claude supports JPEG, PNG or WebP photos only.');
+    if (!process.env.ANTHROPIC_API_KEY) throw new Error('Anthropic API key is missing from .env.');
 
     const prompt = `You are helping a regular person create a UK Facebook Marketplace listing from an item photo.
 
@@ -82,29 +86,40 @@ Return the title, price, category, condition, and description. The title must in
 
 The description must sound casual and practical, with no marketing language. It must have exactly two paragraphs separated by a blank line. Paragraph 1 introduces the item. Paragraph 2 states the visible condition and a simple reason for selling. Do not mention collection, delivery or availability.`;
 
-    try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const response = await ai.models.generateContent({
-            model: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
-            contents: [
-                {
-                    inlineData: {
-                        data: fs.readFileSync(selectedPhoto, { encoding: 'base64' }),
-                        mimeType
-                    }
-                },
-                { text: prompt }
-            ],
-            config: {
-                responseMimeType: 'application/json',
-                responseJsonSchema: listingSchema
-            }
-        });
+    const photoData = fs.readFileSync(selectedPhoto);
+    const cacheKey = crypto.createHash('sha256').update(photoData).digest('hex');
+    if (resultCache.has(cacheKey)) return resultCache.get(cacheKey);
 
-        return normalizeListingDetails(JSON.parse(response.text));
+    try {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'x-api-key': process.env.ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001',
+                max_tokens: 1024,
+                tools: [{ name: 'create_listing', description: 'Submit the listing details.', input_schema: listingSchema }],
+                tool_choice: { type: 'tool', name: 'create_listing' },
+                messages: [{
+                    role: 'user',
+                    content: [
+                        { type: 'image', source: { type: 'base64', media_type: mimeType, data: photoData.toString('base64') } },
+                        { type: 'text', text: prompt }
+                    ]
+                }]
+            })
+        });
+        if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
+        const body = await res.json();
+        const details = normalizeListingDetails(body.content.find(block => block.type === 'tool_use')?.input);
+        resultCache.set(cacheKey, details);
+        return details;
     } catch (error) {
         console.error('AI Research Error:', error);
-        throw new Error('Failed to analyze the image with Gemini. Check the image, API key, and quota.', { cause: error });
+        throw new Error('Failed to analyze the image with Claude. Check the image, API key, and quota.', { cause: error });
     }
 }
 
