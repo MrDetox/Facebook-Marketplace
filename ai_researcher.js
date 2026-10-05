@@ -99,7 +99,7 @@ The description must sound casual and practical, with no marketing language. It 
                 'content-type': 'application/json'
             },
             body: JSON.stringify({
-                model: process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001',
+                model: process.env.CLAUDE_MODEL || 'claude-sonnet-5-5',
                 max_tokens: 1024,
                 tools: [{ name: 'create_listing', description: 'Submit the listing details.', input_schema: listingSchema }],
                 tool_choice: { type: 'tool', name: 'create_listing' },
