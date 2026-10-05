@@ -100,9 +100,8 @@ The description must sound casual and practical, with no marketing language. It 
             },
             body: JSON.stringify({
                 model: process.env.CLAUDE_MODEL || 'claude-sonnet-5-5',
-                max_tokens: 1024,
-                tools: [{ name: 'create_listing', description: 'Submit the listing details.', input_schema: listingSchema }],
-                tool_choice: { type: 'tool', name: 'create_listing' },
+                max_tokens: 4096,
+                output_config: { effort: 'low', format: { type: 'json_schema', schema: listingSchema } },
                 messages: [{
                     role: 'user',
                     content: [
@@ -114,7 +113,7 @@ The description must sound casual and practical, with no marketing language. It 
         });
         if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
         const body = await res.json();
-        const details = normalizeListingDetails(body.content.find(block => block.type === 'tool_use')?.input);
+        const details = normalizeListingDetails(JSON.parse(body.content.find(block => block.type === 'text')?.text));
         resultCache.set(cacheKey, details);
         return details;
     } catch (error) {
