@@ -1,7 +1,12 @@
 const { GoogleGenAI } = require('@google/genai');
 const fs = require('fs');
 
-const collectionLine = 'Collection from LS6, Holborn Approach street.';
+// Default text appended to the bottom of every listing. Edit here.
+const footer = [
+    "If it doesn't say pending or sold, then it's still available.",
+    'Collection from LS6 2NU',
+    'Can also deliver'
+].join('\n');
 const allowedConditions = new Set(['New', 'Used - like new', 'Used - good', 'Used - fair']);
 const listingSchema = {
     type: 'object',
@@ -11,7 +16,7 @@ const listingSchema = {
         price: { type: 'string', description: 'Competitive UK used price as digits only, with optional decimal places.' },
         category: { type: 'string', description: 'The most specific Facebook Marketplace category for the item.' },
         condition: { type: 'string', enum: [...allowedConditions] },
-        description: { type: 'string', description: 'Exactly three short paragraphs separated by blank lines.' }
+        description: { type: 'string', description: 'Exactly two short paragraphs separated by a blank line.' }
     },
     required: ['title', 'price', 'category', 'condition', 'description']
 };
@@ -59,7 +64,7 @@ function normalizeListingDetails(details) {
         price,
         category,
         condition,
-        description: `${bodyParagraphs[0]}\n\n${bodyParagraphs.slice(1).join(' ')}\n\n${collectionLine}`
+        description: `${bodyParagraphs[0]}\n\n${bodyParagraphs.slice(1).join(' ')}\n\n${footer}`
     };
 }
 
@@ -75,7 +80,7 @@ async function researchItem(photoPaths, aiPhotoIndex = 0) {
 
 Return the title, price, category, condition, and description. The title must include the visible brand or author and format where relevant, and must be no more than 100 characters. Price must be a competitive used price in GBP, expressed as digits only without a currency symbol. Choose the most specific Facebook Marketplace category available. Do not invent flaws or details that are not visible.
 
-The description must sound casual and practical, with no marketing language. It must have exactly three paragraphs separated by blank lines. Paragraph 1 introduces the item. Paragraph 2 states the visible condition and a simple reason for selling. Paragraph 3 must be exactly: ${collectionLine}`;
+The description must sound casual and practical, with no marketing language. It must have exactly two paragraphs separated by a blank line. Paragraph 1 introduces the item. Paragraph 2 states the visible condition and a simple reason for selling. Do not mention collection, delivery or availability.`;
 
     try {
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });

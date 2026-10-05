@@ -49,11 +49,11 @@ test('normalizes and validates AI listing output', () => {
         price: '5.00',
         category: 'Books',
         condition: 'Used - good',
-        description: 'Sally Rooney hardback copy.\\n\\nIn good used condition and selling after reading.\\n\\nCollection from LS6, Holborn Approach street.'
+        description: 'Sally Rooney hardback copy.\\n\\nIn good used condition and selling after reading.'
     });
 
     assert.equal(listing.description.split('\n\n').length, 3);
-    assert.match(listing.description, /Collection from LS6, Holborn Approach street\.$/);
+    assert.match(listing.description, /Collection from LS6 2NU\nCan also deliver$/);
     assert.throws(() => normalizeListingDetails({ ...listing, price: '£5' }), /invalid price/);
 });
 
