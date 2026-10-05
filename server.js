@@ -4,7 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const dotenv = require('dotenv');
-const { researchItem, detectImageMime } = require('./ai_researcher');
+const { researchItem, detectImageMime, getFooter, setFooter } = require('./ai_researcher');
 const { uploadToFacebook, closeBrowser } = require('./facebook_uploader');
 const { spawn } = require('child_process');
 const QRCode = require('qrcode');
@@ -255,6 +255,15 @@ app.post('/api/queue', upload.array('photos', maxPhotos), (req, res) => {
         removeFiles((req.files || []).map(file => file.path));
         res.status(error.statusCode || 500).json({ error: error.message });
     }
+});
+
+app.get('/api/footer', (req, res) => res.json({ footer: getFooter() }));
+
+app.put('/api/footer', (req, res) => {
+    const footer = typeof req.body.footer === 'string' ? req.body.footer : '';
+    if (footer.length > 1000) return res.status(400).json({ error: 'Default text is too long.' });
+    setFooter(footer);
+    res.json({ footer: getFooter() });
 });
 
 app.get('/api/queue', (req, res) => {

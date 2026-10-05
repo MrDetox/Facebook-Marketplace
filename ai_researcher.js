@@ -4,12 +4,22 @@ const crypto = require('crypto');
 // ponytail: in-memory, lost on restart. Same photo bytes = reuse the earlier AI result.
 const resultCache = new Map();
 
-// Default text appended to the bottom of every listing. Edit here.
-const footer = [
-    "If it doesn't say pending or sold, then it's still available.",
-    'Collection from LS6 2NU',
-    'Can also deliver'
-].join('\n');
+// Default text appended to the bottom of every listing. Editable in the app, saved to .footer.json.
+const footerFile = require('path').join(__dirname, '.footer.json');
+const defaultFooter = "If it doesn't say pending or sold, then it's still available.\nCollection from LS6 2NU\nCan also deliver";
+
+function getFooter() {
+    try {
+        return String(JSON.parse(fs.readFileSync(footerFile, 'utf8')).footer);
+    } catch (error) {
+        return defaultFooter;
+    }
+}
+
+function setFooter(text) {
+    fs.writeFileSync(footerFile, JSON.stringify({ footer: String(text).replace(/\r\n/g, '\n').trim() }));
+    resultCache.clear();
+}
 const allowedConditions = new Set(['New', 'Used - like new', 'Used - good', 'Used - fair']);
 const listingSchema = {
     type: 'object',
@@ -67,7 +77,7 @@ function normalizeListingDetails(details) {
         price,
         category,
         condition,
-        description: `${bodyParagraphs[0]}\n\n${bodyParagraphs.slice(1).join(' ')}\n\n${footer}`
+        description: `${bodyParagraphs[0]}\n\n${bodyParagraphs.slice(1).join(' ')}\n\n${getFooter()}`
     };
 }
 
@@ -122,4 +132,4 @@ The description must sound casual and practical, with no marketing language. It 
     }
 }
 
-module.exports = { detectImageMime, normalizeListingDetails, researchItem };
+module.exports = { getFooter, setFooter, detectImageMime, normalizeListingDetails, researchItem };

@@ -30,6 +30,11 @@
                 <!-- Main Editor Column -->
                 <div class="main-content">
                     <div class="upload-section">
+                        <label for="footerText"><strong>Default text at the bottom of every listing</strong></label>
+                        <textarea id="footerText" rows="4" maxlength="1000" style="width:100%;margin:8px 0;box-sizing:border-box"></textarea>
+                        <button type="button" id="footerSave" class="primary-btn" disabled>Save default text</button>
+                        <span id="footerMsg" style="margin-left:8px;opacity:0">Saved</span>
+                        <hr style="margin:16px 0">
                         <form id="uploadForm">
                             <div class="file-drop-area" id="dropArea">
                                 <span class="file-message">Drag & drop photos here or click to select</span>
@@ -124,6 +129,27 @@
             if (token) headers.set('X-Access-Token', token);
             return fetch(url, { ...options, headers });
         }
+
+        const footerText = document.getElementById('footerText');
+        const footerSave = document.getElementById('footerSave');
+        const footerMsg = document.getElementById('footerMsg');
+        let savedFooter = '';
+        authenticatedFetch('/api/footer').then(r => r.json()).then(d => {
+            savedFooter = footerText.value = d.footer;
+        });
+        footerText.addEventListener('input', () => { footerSave.disabled = footerText.value.trim() === savedFooter; });
+        footerSave.addEventListener('click', async () => {
+            const r = await authenticatedFetch('/api/footer', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ footer: footerText.value })
+            });
+            if (!r.ok) return alert('Could not save the default text.');
+            savedFooter = footerText.value = (await r.json()).footer;
+            footerSave.disabled = true;
+            footerMsg.style.transition = 'none'; footerMsg.style.opacity = 1;
+            setTimeout(() => { footerMsg.style.transition = 'opacity 1s'; footerMsg.style.opacity = 0; }, 1500);
+        });
 
         function authenticatedUrl(url) {
             const token = sessionStorage.getItem(accessTokenKey);
